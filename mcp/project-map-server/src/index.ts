@@ -4,6 +4,8 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const server = new Server(
   { name: "project-map-server", version: "1.0.0" },
@@ -50,6 +52,99 @@ const DETECT_STACK_TOOL = {
   },
 };
 
+interface TreeNode {
+  name: string;
+  type: "file" | "dir";
+  path: string;
+  size?: number;
+  children?: TreeNode[];
+}
+
+function shouldExclude(name: string, excludePatterns: string[]): boolean {
+  return excludePatterns.some((p) => name === p || name.startsWith(p + "/"));
+}
+
+function scanDir(
+  dirPath: string,
+  rootPath: string,
+  currentDepth: number,
+  maxDepth: number,
+  excludePatterns: string[]
+): TreeNode[] {
+  if (currentDepth > maxDepth) return [];
+
+  const results: TreeNode[] = [];
+  let entries: string[];
+
+  try {
+    entries = fs.readdirSync(dirPath);
+  } catch {
+    return [];
+  }
+
+  for (const entry of entries) {
+    if (shouldExclude(entry, excludePatterns)) continue;
+
+    const fullPath = path.join(dirPath, entry);
+    const relativePath = path.relative(rootPath, fullPath);
+    let stat: fs.Stats;
+
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue;
+    }
+
+    if (stat.isDirectory()) {
+      const children = scanDir(fullPath, rootPath, currentDepth + 1, maxDepth, excludePatterns);
+      results.push({ name: entry, type: "dir", path: relativePath, children });
+    } else {
+      results.push({ name: entry, type: "file", path: relativePath, size: stat.size });
+    }
+  }
+
+  // Dirs first, then alphabetical
+  results.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return results;
+}
+
+async function handleScan(args: Record<string, unknown>) {
+  const rootPath = args.rootPath as string;
+  const maxDepth = (args.maxDepth as number) ?? 4;
+  const excludePatterns = (args.excludePatterns as string[]) ?? [
+    "node_modules", ".git", "dist", ".claude",
+  ];
+
+  if (!fs.existsSync(rootPath)) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "path_not_found", message: `Path not found: ${rootPath}` }) }] };
+  }
+
+  const tree = scanDir(rootPath, rootPath, 0, maxDepth, excludePatterns);
+
+  let fileCount = 0;
+  let dirCount = 0;
+  let totalSize = 0;
+
+  function count(node: TreeNode) {
+    if (node.type === "file") {
+      fileCount++;
+      totalSize += node.size ?? 0;
+    } else {
+      dirCount++;
+      node.children?.forEach(count);
+    }
+  }
+  count({ name: "root", type: "dir", path: "", children: tree });
+
+  return {
+    content: [{ type: "text", text: JSON.stringify({ tree, fileCount, dirCount, totalSize }) }],
+  };
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [SCAN_STRUCTURE_TOOL, ANALYZE_KEY_FILES_TOOL, DETECT_STACK_TOOL],
 }));
@@ -59,8 +154,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   switch (name) {
     case "scan_structure":
-      // TODO: implement
-      return { content: [{ type: "text", text: "{}" }] };
+      return await handleScan(args ?? {});
     case "analyze_key_files":
       // TODO: implement
       return { content: [{ type: "text", text: "{}" }] };
