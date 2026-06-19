@@ -18,7 +18,7 @@ description: 更新/刷新项目结构地图 (CLAUDE.md)，手动触发 project-
 
 1. 调用 `project-map` Skill 的完整流程
 2. 扫描全部目录结构、分析文件用途、检测技术栈
-3. 生成 ≤ 50 行的 CLAUDE.md
+3. 生成 ≤ 200 行的 CLAUDE.md
 4. 报告变更摘要
 
 ### 快速模式（`--quick`）
