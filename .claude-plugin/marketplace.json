@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "project-map-marketplace",
+  "metadata": {
+    "description": "Project Map plugin — auto-maintain CLAUDE.md, save tokens, keep architecture rules",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "project-map",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/zihuaiyou/claude-project-map-plugin.git"
+      },
+      "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
+      "version": "1.0.0",
+      "strict": false
+    }
+  ]
+}

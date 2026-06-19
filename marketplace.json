@@ -1,7 +1,0 @@
-{
-  "name": "project-map",
-  "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
-  "plugins": {
-    "project-map": "./plugin.json"
-  }
-}
