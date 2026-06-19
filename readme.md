@@ -1,7 +1,6 @@
 # Project Map — CLAUDE.md 自动维护插件
 
-> Claude 每次对话自动读 CLAUDE.md 了解项目结构，省去重新探索的 token。但手动维护易过时。  
-> 这个插件自动扫描项目、检测变更、增量更新 CLAUDE.md，始终 ≤ 200 行。
+> Claude 每次对话自动读 CLAUDE.md 了解项目结构。此插件自动维护它：增量更新、按规模分级、始终 ≤200 行。
 
 ---
 
@@ -10,84 +9,90 @@
 ### 1. 三层系统
 
 ```
-用户指令 (/update-map)
-  → Skill 编排逻辑          (.claude/skills/project-map.md)
-    → MCP Server 只读采集   (mcp/project-map-server/src/index.ts)
-      → CLAUDE.md 输出      (项目根目录，≤200 行)
+/update-map [--full|--quick|--package <name>]
+  → Skill 编排（.claude/skills/project-map.md）
+    → MCP Server 只读采集（mcp/project-map-server/src/）
+      → CLAUDE.md 输出（根目录或 packages/<name>/，≤200 行）
 ```
 
-| 层 | 职责 | 写文件？ |
-|----|------|---------|
-| **MCP Server** (TypeScript) | 4 个 tool：扫目录、分析文件、检测技术栈、提取架构规则 | ❌ 只读 |
-| **Skill** (Markdown 指令) | 编排流程、合并数据、压缩内容 | ✅ 写 CLAUDE.md |
-| **Command** (`/update-map`) | 手动触发入口 | - |
+| 层 | 写文件？ | 职责 |
+|----|---------|------|
+| **MCP Server** | ❌ 纯只读 | 7 模块：scan / analyze / detect / arch / resources + types + index |
+| **Skill** | ✅ 写 CLAUDE.md | 编排流程、合并数据、压缩至 ≤200 行 |
+| **Command** | - | 手动触发，支持 --full / --quick / --package |
 
-### 2. 三种执行模式
+### 2. 执行模式
 
 ```
-/update-map        智能模式（有 _git_ref 则增量，否则全量）
-/update-map --full 强制全量
-/update-map --quick 快速（目录树对比，无变化跳过）
+/update-map                     智能（有 _git_ref 增量，否则全量）
+/update-map --full              强制全量
+/update-map --quick             目录树对比，无变化跳过
+/update-map --package <name>    限定单包范围（monorepo）
 ```
 
-#### 增量模式（省 token 的关键）
+#### 增量 → 省 token
 
 ```
 CLAUDE.md 存 _git_ref = a1b2c3d
   → git diff a1b2c3d..HEAD --name-only
-  → 拿到变更文件列表
-  → 只分析这 N 个文件（跳过其余）
-  → 更新 CLAUDE.md + 写回新 HEAD hash
+  → 只分析 N 个变更文件（跳过其余）
+  → 更新 CLAUDE.md + 写回新 HEAD
 ```
 
-**省多少：** 100 文件项目改 5 个 → 跳读 95 个 → ~97% token 节省。
+典型节省：100 文件改 5 个 → 跳读 95 个 → **~97%**。
 
-**回退安全：** rebase 后 ref 不存在 → 静默降级到目录树对比。不是 git 仓库 → 降级到全量。
+回退安全：rebase 后 ref 失效 → 降级目录树对比。非 git 仓库 → 降级全量。
 
-### 3. 分级输出（按项目规模自适应）
+### 3. 分级输出（按文件数自适应）
 
-`scan_structure` 返回 `fileCount` → 自动选模板：
-
-| 级别 | 文件数 | Key Files | 目录树 | 适用场景 |
-|------|--------|-----------|--------|---------|
-| **小型** | <200 | 列举 6 个最重要文件 | 深度 ≤ 3 | 当前项目（~80 文件） |
+| 级别 | 文件数 | Key Files | 目录树 | 适用 |
+|------|--------|-----------|--------|------|
+| **小型** | <200 | 6 个最关键文件 | 深度 ≤ 3 | 当前项目（~40 文件） |
 | **中型** | 200-1000 | 按目录分组摘要 | 深度 ≤ 2 | 中大型应用 |
-| **大型** | >1000 | 不设此节 | 深度 ≤ 1，仅顶层 | monorepo |
+| **大型** | >1000 | 不设此节 | 深度 ≤ 1 | monorepo |
 
-大项目自动跳过 `extract_arch_patterns`（架构规则从目录结构推断，不扫描导入图）。
+大项目自动跳过 `extract_arch_patterns`，从目录结构直接推断规则。
 
 ### 4. 架构变更检测
 
-每次更新时自动比对新目录树 vs CLAUDE.md 记录的规则：
+比对新目录树 vs CLAUDE.md 规则 → 发现目录移动/新增 → 告警不自动改。
 
-```
-⚠️ 检测到架构变更：
-  • API 路由从 src/app/api/ 移至 src/api/
-  • 新目录 src/hooks/ 未在规则中覆盖
-```
+### 5. Monorepo 支持
 
-**原则：** 仅告警，不自动改规则。用户确认后才更新。
+| 机制 | 原理 |
+|------|------|
+| **`--package`** | 手动指定子包，扫描/写入都限到该目录 |
+| **MCP Resource** | Server 自动发现 `packages/*/CLAUDE.md`，Claude 原生读取 |
 
----
-
-## MCP Server 工具
-
-| 工具 | 输入 | 输出 | 调用时机 |
-|------|------|------|---------|
-| `scan_structure` | rootPath, maxDepth, excludePatterns | 目录树 + fileCount | 每次必调 |
-| `analyze_key_files` | rootPath + globs **或** filePaths | 每文件 path/size/exports/用途 | 全量用 globs，增量用 filePaths |
-| `detect_stack` | rootPath | 语言/框架/构建工具/PM | 全量调 / 增量仅 package.json 变更时 |
-| `extract_arch_patterns` | rootPath | 目录命名惯例 + 导入关系 + 规则 | 仅全量或目录结构显著变化 |
+非 monorepo 零影响：无匹配目录时资源列表为空。
 
 ---
 
-## 压缩约束（必须遵守）
+## MCP Server 模块
+
+`mcp/project-map-server/src/` 拆为 7 文件，各管一事：
+
+| 模块 | 职责 | 关键导出 |
+|------|------|---------|
+| `index.ts` | 入口：创建 server、注册 handlers、启动 | - |
+| `types.ts` | 7 个接口定义 | TreeNode, FileInfo, StackInfo 等 |
+| `scan.ts` | 递归扫描目录树 | `SCAN_STRUCTURE_TOOL`, `handleScan` |
+| `analyze-files.ts` | 读文件 → 提取 exports → 推断用途 | `ANALYZE_KEY_FILES_TOOL`, `handleAnalyzeKeyFiles` |
+| `detect-stack.ts` | 从 package.json 检测技术栈 | `DETECT_STACK_TOOL`, `handleDetectStack` |
+| `arch-patterns.ts` | 分析命名惯例 + 导入图 → 生成规则 | `EXTRACT_ARCH_PATTERNS_TOOL`, `handleExtractArchPatterns` |
+| `resources.ts` | 自动发现子包 CLAUDE.md | `findPackageClaudeMds` |
+
+所有 tool 通过 `rootPath` 参数支持根目录和包级两种模式，同一个模块两处用。
+
+---
+
+## 压缩约束
 
 - CLAUDE.md 总行数 ≤ 200 行
-- 不包含：函数签名、import 语句、实现细节
-- 只包含：Claude 需要知道的隐藏信息（结构、用途、约定、不明显的依赖）
-- Architecture Rules：命令式语言 + 每条附理由
-- frontmatter 包含 `_git_ref: {commit_hash}`
+- 不包含：函数签名、import、实现细节
+- 只包含：Claude 需要的隐藏信息（结构、用途、约定、不明显依赖）
+- Architecture Rules：命令式 + 每条附理由
+- frontmatter 含 `_git_ref: {commit_hash}`
 
 ---
 
@@ -95,25 +100,22 @@ CLAUDE.md 存 _git_ref = a1b2c3d
 
 ```
 my_claude_plugin/
-├── CLAUDE.md                              ← 输出目标（自动维护）
+├── CLAUDE.md                               ← 输出目标（自动维护，42 行）
 ├── .claude/
-│   ├── settings.json                      ← MCP Server 注册
-│   ├── skills/project-map.md              ← Skill 编排逻辑
-│   └── commands/update-map.md             ← 手动触发命令
+│   ├── settings.json                       ← MCP Server 注册
+│   ├── skills/project-map.md               ← Skill 编排逻辑
+│   └── commands/update-map.md              ← 手动触发命令
 ├── mcp/project-map-server/
-│   ├── src/index.ts                       ← MCP Server（4 tools）
-│   ├── package.json
-│   └── tsconfig.json
-└── docs/
-    ├── LEARN_CLAUDE_PLUGIN.md
-    └── superpowers/specs/                 ← 设计文档
+│   ├── src/
+│   │   ├── index.ts                        ← 入口
+│   │   ├── types.ts                        ← 类型定义
+│   │   ├── scan.ts                         ← 目录扫描
+│   │   ├── analyze-files.ts                ← 文件分析
+│   │   ├── detect-stack.ts                 ← 技术栈检测
+│   │   ├── arch-patterns.ts                ← 架构模式
+│   │   └── resources.ts                    ← MCP Resource
+│   └── package.json + tsconfig.json
+├── docs/
+│   └── LEARN_CLAUDE_PLUGIN.md
+└── readme.md
 ```
-
----
-
-## 未来可能的方向
-
-- **Git hook**：post-commit 自动触发增量更新
-- **Workflow 编排**：多 Agent 并行扫描
-- **缓存**：`.claude/memory/project-map/latest.json` 缓存上次扫描结果
-- **CI 集成**：pipeline 中运行 extract_arch_patterns，检测未授权结构变更
