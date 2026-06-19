@@ -6,9 +6,7 @@
   "author": {
     "name": "zihuaiyou"
   },
-  "skills": "skills",
-  "commands": "commands",
-  "mcpServers": {
+"mcpServers": {
     "project-map": {
       "command": "npx",
       "args": ["-y", "tsx", "${pluginDir}/mcp/project-map-server/src/index.ts"],
