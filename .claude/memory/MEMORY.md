@@ -1,3 +1,0 @@
-- [Project Snapshot Skill](../skills/project-snapshot.md) — 教学示例：项目快照分析技能
-- [/snapshot 命令](../commands/snapshot.md) — 教学示例：查看快照的斜杠命令
-- [快照数据](snapshots/latest.md) — 最新快照示例
