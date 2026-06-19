@@ -1,6 +1,9 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "project-map-marketplace",
+  "owner": {
+    "name": "zihuaiyou"
+  },
   "metadata": {
     "description": "Project Map plugin — auto-maintain CLAUDE.md, save tokens, keep architecture rules",
     "version": "1.0.0"
