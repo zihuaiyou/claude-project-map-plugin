@@ -15,7 +15,10 @@
 - All paths relative to project root
 - Exclude node_modules, .git, dist, .claude from scanning
 - Dependencies: @modelcontextprotocol/sdk, fast-glob, typescript, @types/node
-- Build target: Node.js CommonJS (ES2020)
+- Build target: Node.js ESM (ES2020, module: "node16")
+- MCP SDK v1.29+ uses Zod schemas: use `ListToolsRequestSchema` / `CallToolRequestSchema` with `setRequestHandler`, NOT string method names
+- Top-level await requires `module: "node16"` / `moduleResolution: "node16"` in tsconfig
+- All tool definitions must use `as const` on `inputSchema.type` for strict TS compatibility
 
 ---
 
