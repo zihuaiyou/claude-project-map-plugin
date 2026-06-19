@@ -8,7 +8,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zihuaiyou/project-map"
+    "url": "https://github.com/zihuaiyou/claude-project-map-plugin"
   },
   "packageManager": "pnpm@10.27.0"
 }

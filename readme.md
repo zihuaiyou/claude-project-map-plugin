@@ -34,8 +34,8 @@
 
 ```bash
 # 在 Claude Code 中运行
-/plugin marketplace add project-map github:zihuaiyou/project-map
-/plugin install project-map@project-map
+/plugin marketplace add https://github.com/zihuaiyou/claude-project-map-plugin.git
+/plugin install project-map
 
 # 装完直接用
 /update-map
@@ -45,13 +45,12 @@
 
 ```bash
 # 下载
-git clone https://github.com/zihuaiyou/project-map.git
-cd project-map/mcp/project-map-server && pnpm install && cd ..
+git clone https://github.com/zihuaiyou/claude-project-map-plugin.git
+cd claude-project-map-plugin/mcp/project-map-server && pnpm install && cd ..
 
 # 在 Claude Code 中注册
-/plugin marketplace add project-map ./path/to/project-map
-/plugin install project-map@project-map
-```
+/plugin marketplace add ./path/to/claude-project-map-plugin
+/plugin install project-map
 
 ## 📖 命令
 
