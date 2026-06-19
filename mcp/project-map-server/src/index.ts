@@ -251,6 +251,96 @@ async function handleAnalyzeKeyFiles(args: Record<string, unknown>) {
   };
 }
 
+interface StackInfo {
+  language?: string;
+  framework?: string;
+  buildTool?: string;
+  testFramework?: string;
+  packageManager?: string;
+  projectType: string;
+  keyDependencies: Array<{ name: string; version: string; category: string }>;
+  scripts: Record<string, string>;
+}
+
+const CATEGORY_MAP: Record<string, string[]> = {
+  framework: ["react", "next", "vue", "nuxt", "svelte", "angular", "express", "nest", "fastify"],
+  build: ["webpack", "vite", "turbopack", "esbuild", "rollup", "parcel", "tsup"],
+  test: ["vitest", "jest", "playwright", "cypress", "testing-library", "mocha", "ava"],
+  styling: ["tailwindcss", "styled-components", "emotion", "sass", "less", "postcss", "unocss"],
+  db: ["prisma", "drizzle", "typeorm", "mongoose", "sequelize", "knex", "redis"],
+};
+
+function detectProjectType(pkg: Record<string, unknown>): string {
+  if (pkg.workspaces) return "monorepo";
+  if (pkg.private && (pkg.scripts as Record<string, unknown>)?.build) return "app";
+  if ((pkg.main ?? pkg.module ?? pkg.exports) && pkg.name) return "library";
+  return "other";
+}
+
+function categorizeDep(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [category, keywords] of Object.entries(CATEGORY_MAP)) {
+    if (keywords.some((k) => lower.includes(k))) return category;
+  }
+  return "util";
+}
+
+function detectFramework(pkgDeps: Record<string, string>): string | undefined {
+  const frameworks = ["next", "nuxt", "svelte", "angular", "express", "nest", "nuxt3", "gatsby", "remix"];
+  for (const fw of frameworks) {
+    if (pkgDeps[fw] || pkgDeps[`@${fw}`]) return fw;
+  }
+  return undefined;
+}
+
+function handleDetectStack(args: Record<string, unknown>) {
+  const rootPath = args.rootPath as string;
+  const pkgPath = path.join(rootPath, "package.json");
+
+  if (!fs.existsSync(pkgPath)) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "no_package_json", message: "No package.json found in root" }) }] };
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+
+  const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  const keyDeps = Object.entries(allDeps)
+    .map(([name, version]) => ({ name, version: String(version), category: categorizeDep(name) }))
+    .slice(0, 30);
+
+  const framework = detectFramework(allDeps);
+  const buildTool = keyDeps.find((d) => d.category === "build")?.name;
+  const testFramework = keyDeps.find((d) => d.category === "test")?.name;
+
+  // Detect package manager from lock file
+  const pm = fs.existsSync(path.join(rootPath, "pnpm-lock.yaml"))
+    ? "pnpm"
+    : fs.existsSync(path.join(rootPath, "yarn.lock"))
+    ? "yarn"
+    : fs.existsSync(path.join(rootPath, "package-lock.json"))
+    ? "npm"
+    : undefined;
+
+  // Detect language
+  const hasTsConfig = fs.existsSync(path.join(rootPath, "tsconfig.json"));
+  const language = hasTsConfig ? "TypeScript" : "JavaScript";
+
+  const result: StackInfo = {
+    language,
+    framework,
+    buildTool,
+    testFramework,
+    packageManager: pm,
+    projectType: detectProjectType(pkg),
+    keyDependencies: keyDeps,
+    scripts: pkg.scripts ?? {},
+  };
+
+  return {
+    content: [{ type: "text", text: JSON.stringify(result) }],
+  };
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [SCAN_STRUCTURE_TOOL, ANALYZE_KEY_FILES_TOOL, DETECT_STACK_TOOL],
 }));
@@ -264,8 +354,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     case "analyze_key_files":
       return await handleAnalyzeKeyFiles(args ?? {});
     case "detect_stack":
-      // TODO: implement
-      return { content: [{ type: "text", text: "{}" }] };
+      return handleDetectStack(args ?? {});
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
