@@ -127,20 +127,25 @@ git diff {gitRef}..HEAD --name-only --diff-filter=D
 - `rootPath`: `{projectRoot}`
 - 增量模式下：仅当目录结构有显著变化时调用
 
-### 步骤 7：生成 CLAUDE.md
+### 步骤 7：项目规模分级
 
-汇总数据，生成精简版 CLAUDE.md。
+根据 `scan_structure` 返回的 `fileCount`（项目总文件数）决定 CLAUDE.md 的详细程度。
 
-**增量合并规则：**
-- 旧 CLAUDE.md 中未变更的文件用途 → 保留
-- changedFiles 对应文件 → 使用新分析结果替换
-- deletedFiles 对应文件 → 移除
-- 目录树 → 使用最新 scan_structure 结果
-- 技术栈 → 仅当重新检测时更新
-- Architecture Rules → 仅当重新提取时更新
-- 时间戳和 _git_ref → 更新
+| 级别 | 总文件数 | 目录树 | Key Files | Conventions | Architecture Rules |
+|------|---------|--------|-----------|-------------|-------------------|
+| 小型 | <200 | 深度 ≤ 3，含关键子目录 | 列举 6 个最重要文件 | 保留，最多 4 条 | 保留 |
+| 中型 | 200-1000 | 深度 ≤ 2，按目录分组 | 按目录分组摘要（不列单个文件） | 保留，最多 3 条 | 保留 |
+| 大型 | >1000 | 深度 ≤ 1，仅顶层目录 | 不设 Key Files 节 | 仅保留关键 2 条 | 保留（最关键的规则） |
 
-**格式要求：**
+判断依据：从 `scan_structure` 返回的 `fileCount` 字段。增量模式下同样适用。
+
+### 步骤 8：生成 CLAUDE.md
+
+根据项目规模分级，选择对应的输出模板。
+
+---
+
+**小型项目模板（<200 文件）：**
 
 ```markdown
 # Project Map
@@ -156,32 +161,103 @@ _上次更新: {date} | 架构版本: {version} | _git_ref: {hash}_
 
 ## Directory Structure
 ```
-{精简目录树 — 只保留有意义的目录和文件}
+{目录树，深度 ≤ 3，只保留关键子目录}
 ```
 
 ## Key Files
-- {path} — {purpose}
+- {path} — {purpose}  （最多 6 条）
 
 ## Architecture Rules
 - {rule}。理由：{reason}。
+
+## Conventions
+- {约定}（最多 4 条）
+```
+
+---
+
+**中型项目模板（200-1000 文件）：**
+
+```markdown
+# Project Map
+
+_上次更新: {date} | 架构版本: {version} | _git_ref: {hash}_
+
+## Tech Stack
+- Framework: {framework}
+- Language: {language}
+- Build: {buildTool}
+- Test: {testFramework}
+- PM: {packageManager}
+
+## Directory Structure
+```
+{目录树，深度 ≤ 2，按目录分组摘要}
+```
+
+## Key Directories
+- {dir} — {用途}（{fileCount} 文件）
+- {dir} — {用途}（{fileCount} 文件）
+  ...
+
+## Architecture Rules
 - {rule}。理由：{reason}。
 
 ## Conventions
-{从文件分析中推断的命名/架构约定}
+- {约定}（最多 3 条）
 ```
 
-**压缩规则（必须遵守）：**
+---
+
+**大型项目模板（>1000 文件）：**
+
+```markdown
+# Project Map
+
+_上次更新: {date} | 架构版本: {version} | _git_ref: {hash}_
+
+## Tech Stack
+- Framework: {framework}
+- Language: {language}
+- Build: {buildTool}
+- Test: {testFramework}
+- PM: {packageManager}
+
+## Directory Structure
+```
+{顶层目录，深度 ≤ 1}
+```
+
+## Architecture Rules
+- {rule}。理由：{reason}。
+  （只保留最核心的规则，不包含细节）
+
+## Conventions
+- {关键约定 1}
+- {关键约定 2}
+```
+
+---
+
+**压缩规则（所有级别必须遵守）：**
 
 1. 总行数 ≤ 200 行（不含 frontmatter 行 `---` 或 `# Project Map` 标题）
 2. 不包含：函数签名、import 语句、实现细节、注释
 3. 只包含：其他 Claude 需要知道的「隐藏信息」
    — 目录结构、文件用途、架构约定、不明显的依赖关系
 4. 删除：明显的内容（如 "src/ 放源码"）、过时信息
-5. 目录树只展示深度 ≤ 3 的关键目录，省略空目录
-6. Key Files 只保留最重要的 6 个文件
-7. Conventions 最多 4 条
-8. Architecture Rules 必须包含理由（「理由：」），每条规则需有依据
-9. Architecture Rules 使用命令式语言（必须/不得/只能/不应），非描述性语言
+5. Architecture Rules 必须包含理由（「理由：」），每条规则需有依据
+6. Architecture Rules 使用命令式语言（必须/不得/只能/不应），非描述性语言
+
+**增量合并规则：**
+- 旧 CLAUDE.md 中未变更的文件用途 → 保留
+- changedFiles 对应文件 → 使用新分析结果替换
+- deletedFiles 对应文件 → 移除
+- 目录树 → 使用最新 scan_structure 结果
+- 技术栈 → 仅当重新检测时更新
+- Architecture Rules → 仅当重新提取时更新
+- 时间戳和 _git_ref → 更新
+- 项目规模分级 → 从最新 scan_structure 的 fileCount 重新判定
 
 ### 步骤 8：写入 CLAUDE.md
 

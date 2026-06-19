@@ -596,7 +596,7 @@ async function handleExtractArchPatterns(args: Record<string, unknown>) {
   // 找源文件（排除常見生成目錄）
   const sourceFiles = await fg("**/*.{ts,tsx,js,jsx}", {
     cwd: rootPath,
-    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**", "**/build/**", "**/coverage/**", "**/.next/**"],
+    ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**", "**/build/**", "**/coverage/**", "**/.next/**","**/mcp/**"],
     onlyFiles: true,
   });
 
