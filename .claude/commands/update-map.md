@@ -9,22 +9,36 @@ description: 更新/刷新项目结构地图 (CLAUDE.md)，手动触发 project-
 
 | 命令 | 效果 |
 |------|------|
-| `/update-map` | 全量更新：重新扫描全部项目结构并刷新 CLAUDE.md |
-| `/update-map --quick` | 快速增量：读取当前 CLAUDE.md，只检查变更的文件并更新 |
+| `/update-map` | 智能更新：有 `_git_ref` 则增量，否则全量 |
+| `/update-map --full` | 强制全量：忽略 `_git_ref`，完整重扫 |
+| `/update-map --quick` | 快速比对：目录树对比，无变化则跳过 |
 
-## 执行流程
+## 执行策略
 
-### 全量模式（默认）
+### 增量模式（默认，CLAUDE.md 有 `_git_ref`）
 
-1. 调用 `project-map` Skill 的完整流程
-2. 扫描全部目录结构、分析文件用途、检测技术栈
-3. 生成 ≤ 200 行的 CLAUDE.md
-4. 报告变更摘要
+```
+1. 读取 CLAUDE.md → 提取 _git_ref
+2. git diff ref..HEAD --name-only → 变动文件列表
+3. 无变动 → 检查目录树 → 仍无变化则跳过
+4. 有变动 → 只扫有变动的文件
+5. 更新 _git_ref 到 HEAD
+```
+
+**token 节省：** 跳过所有未变更文件的读取和分析。
+
+### 全量模式（`--full` 或首次运行）
+
+完整扫描全部目录结构、分析文件用途、检测技术栈、提取架构规则。
 
 ### 快速模式（`--quick`）
 
-1. 读取当前 CLAUDE.md
-2. 使用 MCP `scan_structure` 获取当前目录树
-3. 与 CLAUDE.md 中的结构对比
-4. 如果结构无变化 → 提示「项目结构无变化，无需更新」
-5. 如果有变化 → 只更新变化的部分，保留已知信息
+读取当前 CLAUDE.md，用 `scan_structure` 获取当前目录树，对比。结构无变化则跳过。
+
+## 回退策略
+
+| 场景 | 行为 |
+|------|------|
+| 项目不是 git 仓库 | 回退到全量扫描 |
+| `_git_ref` 指向的 commit 不存在（rebase 后） | 回退到快速模式（目录树对比） |
+| MCP Server 不可用 | 报错中止 |

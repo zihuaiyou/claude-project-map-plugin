@@ -45,15 +45,19 @@ const SCAN_STRUCTURE_TOOL = {
 /**
  * 工具：分析关键文件
  * 读取配置文件（package.json、tsconfig 等）和源码头，推断文件用途
+ * 支持两种模式：
+ *   1. globs 模式：按 glob 匹配文件（全量扫描，默认）
+ *   2. filePaths 模式：仅分析指定路径（增量扫描，优先于 globs）
  */
 const ANALYZE_KEY_FILES_TOOL = {
   name: "analyze_key_files",
-  description: "Read key config files and source headers to infer file purposes",
+  description: "Read key config files and source headers to infer file purposes. Supports glob-based (full) or filePaths (incremental) mode.",
   inputSchema: {
     type: "object" as const,
     properties: {
       rootPath: { type: "string", description: "Project root absolute path" },
-      globs: { type: "array", items: { type: "string" }, description: "Glob patterns to match" },
+      globs: { type: "array", items: { type: "string" }, description: "Glob patterns to match (full scan mode)" },
+      filePaths: { type: "array", items: { type: "string" }, description: "Specific relative file paths to analyze (incremental mode, overrides globs)" },
     },
     required: ["rootPath"],
   },
@@ -328,24 +332,35 @@ function inferPurpose(filePath: string, firstLine: string, exports: string[]): s
  */
 async function handleAnalyzeKeyFiles(args: Record<string, unknown>) {
   const rootPath = args.rootPath as string;
-  const globs = (args.globs as string[]) ?? [
-    "package.json",
-    "tsconfig.json",
-    "src/**/*.{ts,tsx}",
-    "*.config.{js,ts}",
-  ];
 
   if (!fs.existsSync(rootPath)) {
     return { content: [{ type: "text", text: JSON.stringify({ error: "path_not_found", message: `Path not found: ${rootPath}` }) }] };
   }
 
-  // 将 glob 拼接为绝对路径
-  const fullGlobs = globs.map((g) => path.posix.join(rootPath.replace(/\\/g, "/"), g));
-  const matchedPaths = await fg(fullGlobs, { ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**"] });
+  // 决定扫描哪些路径：filePaths 优先（增量模式），否则 globs（全量模式）
+  let pathsToAnalyze: string[];
+  const filePaths = args.filePaths as string[] | undefined;
+
+  if (filePaths && filePaths.length > 0) {
+    // 增量模式：只扫指定文件
+    pathsToAnalyze = filePaths
+      .map((fp) => path.join(rootPath, fp))
+      .filter((p) => fs.existsSync(p)); // 跳过已删除的文件
+  } else {
+    // 全量模式：按 glob 匹配
+    const globs = (args.globs as string[]) ?? [
+      "package.json",
+      "tsconfig.json",
+      "src/**/*.{ts,tsx}",
+      "*.config.{js,ts}",
+    ];
+    const fullGlobs = globs.map((g) => path.posix.join(rootPath.replace(/\\/g, "/"), g));
+    pathsToAnalyze = await fg(fullGlobs, { ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**"] });
+  }
 
   const files: FileInfo[] = [];
 
-  for (const p of matchedPaths.slice(0, 200)) {
+  for (const p of pathsToAnalyze.slice(0, 200)) {
     let content: string;
     try {
       content = fs.readFileSync(p, "utf-8");

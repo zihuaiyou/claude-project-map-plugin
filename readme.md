@@ -1,13 +1,14 @@
 # Project Map 插件设计文档
 
-> 一个维护 CLAUDE.md 的 Claude 插件，自动扫描项目结构、更新地图信息，减少后续会话的 Token 消耗
+> 一个维护 CLAUDE.md 的 Claude 插件，自动扫描项目结构、增量更新地图信息，减少后续会话的 Token 消耗
 
 ## 1. 背景
 
 ### 1.1 问题
 
-1. **Token 浪费**：Claude 新增功能时，缺乏上下文，需大量读文件理解项目结构。CLAUDE.md 可缓解，但手动维护易过时。
+1. **Token 浪费**：Claude 新增功能时缺乏上下文，需大量读文件理解项目结构。CLAUDE.md 可缓解，但手动维护易过时。
 2. **架构越界**：Claude 不清楚项目架构约定（目录边界、命名规范、导入限制），新增功能可能违反既有架构设计。开发者需事后人工审查纠正。
+3. **全量扫描浪费**：旧方案每次更新都完整重扫全部文件，即使只改 1 个文件也跑满 4 个 MCP Tool，隐性 token 消耗大。
 
 ### 1.2 目标
 
@@ -15,16 +16,19 @@
 
 1. **自动维护地图**：项目结构变更时自动更新 CLAUDE.md，保持准确且精简（≤200 行）。
 2. **强化架构约束**：从代码库自动提取架构规则（目录约定、命名规范、导入边界），写入 CLAUDE.md 供 Claude 遵循。
-3. **检测架构偏移**：每次更新时对比当前结构与已有规则，发现偏移即告警。
-4. **降低 Token 消耗**：后续对话无需重复探索项目结构。
+3. **增量优先**：利用 git 历史精准定位变更文件，只分析差异，跳过未变部分，节省 80-97% token。
+4. **检测架构偏移**：每次更新时对比当前结构与已有规则，发现偏移即告警。
+5. **降低 Token 消耗**：后续对话无需重复探索项目结构。
 
 ### 1.3 成功指标
 
 - CLAUDE.md 始终 ≤ 200 行
 - 结构变更后 1 次交互内完成更新
 - 新增功能时 Claude 读文件量减少 ≥ 200%
+- 增量模式跳过未变更文件的 token 节省 ≥ 80%
 - Architecture Rules 覆盖项目核心目录（覆盖率 ≥ 80%）
 - Rules 使用命令式语言且包含理由，可被 Claude 作为约束执行
+- `_git_ref` 写回准确率 100%，rebase 后自动降级到目录树对比
 
 ## 2. 架构
 
@@ -36,13 +40,18 @@
     ▼
 Skill (project-map.md)
     │
-    ├── 调用 MCP Tool: scan_structure
-    ├── 调用 MCP Tool: analyze_key_files
-    ├── 调用 MCP Tool: detect_stack
-    ├── 调用 MCP Tool: extract_arch_patterns
+    ├── [有 _git_ref] → git diff ref..HEAD → 增量扫描
+    │     只分析变更文件，跳过 extract_arch_patterns
+    │
+    ├── [无 _git_ref] → 全量扫描
+    │     scan_structure + analyze_key_files (全量)
+    │     + detect_stack + extract_arch_patterns
+    │
+    ├── [--quick 且无 _git_ref] → 目录树对比
+    │     结构无变则跳过
     │
     ▼
-Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md
+Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md（含 _git_ref）
         │
         ▼
    架构变更检测（结构 vs 现有规则）
@@ -108,13 +117,14 @@ Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md
 
 #### 3.2.2 `analyze_key_files`
 
-分析关键文件的用途。
+分析关键文件的用途。支持两种模式：全量（glob 匹配）和增量（指定文件路径）。
 
 ```typescript
 // 输入
 {
   rootPath: string;
-  globs?: string[];  // 默认 ["package.json", "tsconfig.json", "src/**/*.{ts,tsx}", "*.config.{js,ts}"]
+  globs?: string[];     // 全量模式：默认 ["package.json", "tsconfig.json", "src/**/*.{ts,tsx}", "*.config.{js,ts}"]
+  filePaths?: string[]; // 增量模式：指定相对路径列表，覆盖 globs。跳过不存在的文件。
 }
 
 // 输出
@@ -129,7 +139,7 @@ Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md
 }
 ```
 
-实现方式：使用 glob 匹配文件列表 → 读取每文件前 10 行 → 提取 exports/imports 模式 → 推断用途（基于路径命名规则和内容特征）。
+实现方式：`filePaths` 优先 → 直接读取指定文件；否则按 glob 匹配 → 读取每文件前 10 行 → 提取 exports/imports 模式 → 推断用途（基于路径命名规则和内容特征）。最多处理 200 个文件。
 
 #### 3.2.3 `detect_stack`
 
@@ -205,23 +215,59 @@ Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md
 
 ### 4.2 执行流程
 
+#### 增量模式（CLAUDE.md 有 `_git_ref`）
+
+```
+1. 读取当前 CLAUDE.md → 提取 _git_ref
+2. git rev-parse HEAD → headHash
+3. git diff {_git_ref}..HEAD --name-only --diff-filter=ACMR → changedFiles
+   git diff {_git_ref}..HEAD --name-only --diff-filter=D → deletedFiles
+4. 无文件变更 → 仅 scan_structure 检查目录树 → 仍无变则跳過
+5. 有文件变更：
+   a. scan_structure → 取最新目录树
+   b. analyze_key_files(filePaths=changedFiles) → 只分析变动文件
+   c. 如 package.json 在 changedFiles 中 → 调 detect_stack
+   d. 如目录结构显著变化 → 调 extract_arch_patterns
+6. Claude 合并新旧数据：
+   - changedFiles → 更新对应条目
+   - deletedFiles → 移除条目
+   - 未变文件 → 保留原记录
+7. 压缩至 ≤ 200 行
+8. 写入 CLAUDE.md（_git_ref 更新为 HEAD）
+9. 输出变更摘要
+```
+
+#### 全量模式（默认 / `--full`）
+
 ```
 1. 读取当前 CLAUDE.md（如果有）
-2. 调用 MCP scan_structure 获取目录树
-3. 调用 MCP analyze_key_files 获取关键文件分析
-4. 调用 MCP detect_stack 获取技术栈
-5. 调用 MCP extract_arch_patterns 获取架构规则
-6. 架构变更检测：
-   - 对比 scan_structure 结果与 CLAUDE.md 中的 Architecture Rules
-   - 若结构无变化 → 跳过
-   - 若检测到变化（文件移动/删除/新增目录）→ 输出警告
-7. Claude 对比新旧数据
-   - 变化 < 20% → 增量更新（只更新变化部分）
-   - 变化 ≥ 20% → 全量重写
-8. 压缩至 ≤ 200 行（含 Architecture Rules）
-9. 写入 CLAUDE.md
-10. 输出变更摘要（含架构规则条数）
+2. headHash = git rev-parse HEAD
+3. 调用 MCP scan_structure → 目录树
+4. 调用 MCP analyze_key_files → 全量文件分析
+5. 调用 MCP detect_stack → 技术栈
+6. 调用 MCP extract_arch_patterns → 架构规则
+7. 架构变更检测（结构 vs 现有规则）
+8. 压缩至 ≤ 200 行
+9. 写入 CLAUDE.md（含 _git_ref: headHash）
+10. 输出变更摘要
 ```
+
+#### 快速模式（`--quick`，无 `_git_ref`）
+
+```
+1. 读取当前 CLAUDE.md
+2. scan_structure → 目录树
+3. 对比目录树 → 无变化则跳过
+4. 有变化 → 只更新变化部分
+```
+
+#### 回退策略
+
+| 场景 | 行为 |
+|------|------|
+| `_git_ref` 指向的 commit 不存在（rebase 后） | 降级到快速模式（目录树对比） |
+| 项目不是 git 仓库 | 降级到全量或快速模式 |
+| `git diff` 执行失败 | 降级到快速模式 |
 
 ### 4.3 压缩规则（关键约束）
 
@@ -233,6 +279,7 @@ Claude 汇总 → 格式塔压缩 → 写入 CLAUDE.md
 删除：明显的内容（"src/ 放源码"）、过时信息
 Architecture Rules 命令式语言（必须/不得/只能/不应）
 Architecture Rules 每条附理由（「理由：」）
+CLAUDE.md frontmatter 包含 _git_ref: {commit_hash} 供增量扫描使用
 ```
 
 ### 4.4 输出格式
@@ -240,7 +287,7 @@ Architecture Rules 每条附理由（「理由：」）
 ```markdown
 # Project Map
 
-_上次更新: 2026-06-19 | 架构版本: v1_
+_上次更新: 2026-06-19 | 架构版本: v1 | _git_ref: a1b2c3d_
 
 ## Tech Stack
 - Framework: Next.js 14 (App Router)
@@ -273,11 +320,22 @@ src/
 
 ### 4.5 检查清单
 
+**全量模式：**
 - [ ] 调用了 4 个 MCP Tool 获取数据
 - [ ] 对比了新旧 CLAUDE.md
 - [ ] 执行了压缩（≤ 200 行）
-- [ ] 写入了 CLAUDE.md
+- [ ] 写入了 CLAUDE.md（含 _git_ref）
 - [ ] 输出了变更摘要
+
+**增量模式（附加）：**
+- [ ] 读取并提取了 CLAUDE.md 中的 _git_ref
+- [ ] 执行了 git diff 获取变更文件列表
+- [ ] 只对变更文件调用了 analyze_key_files(filePaths=...)
+- [ ] 仅当 package.json 变更时调用 detect_stack
+- [ ] 仅当目录结构显著变化时调用 extract_arch_patterns
+- [ ] 正确合并：更新变更条目 + 移除已删条目 + 保留未变条目
+- [ ] 更新了 _git_ref 为当前 HEAD
+- [ ] 输出了增量变更摘要（含跳过的文件数）
 
 ### 4.6 边界约束
 
@@ -287,6 +345,8 @@ src/
 - ☑ 不访问外部网络
 - ☑ 如果 MCP Server 返回错误，中止流程并报错
 - ☑ 架构变更检测仅输出警告，不自动修改 Architecture Rules；需用户确认后才更新
+- ☑ 增量模式下如果 `git diff` 因 ref 不存在报错（rebase 后），静默降级到目录树对比
+- ☑ 如果项目不是 git 仓库，跳过增量模式降级到全量或快速模式
 
 ### 4.7 架构变更检测
 
@@ -323,8 +383,9 @@ description: 更新/刷新项目结构地图 (CLAUDE.md)
 
 执行 project-map Skill 更新 CLAUDE.md。
 
-用法: /update-map          # 全量更新
-      /update-map --quick  # 快速增量（只检上次写入后有变更的文件）
+用法: /update-map          # 智能模式：有 _git_ref 则增量，否则全量
+      /update-map --full   # 强制全量扫描（忽略 _git_ref）
+      /update-map --quick  # 快速增量（目录树对比，无变化则跳过）
 ```
 
 ## 6. 项目文件结构
