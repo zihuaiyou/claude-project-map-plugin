@@ -87,7 +87,7 @@ function scanDir(
     if (shouldExclude(entry, excludePatterns)) continue;
 
     const fullPath = path.join(dirPath, entry);
-    const relativePath = path.relative(rootPath, fullPath);
+    const relativePath = path.relative(rootPath, fullPath).replace(/\\/g, "/");
     let stat: fs.Stats;
 
     try {
@@ -176,7 +176,7 @@ function extractExports(content: string): string[] {
 
 function inferPurpose(filePath: string, firstLine: string, exports: string[]): string {
   const name = path.basename(filePath);
-  const dir = path.dirname(filePath);
+  const dir = path.dirname(filePath).replace(/\\/g, "/");
 
   // Config files
   if (name === "package.json") return "Project metadata & dependencies";
@@ -286,9 +286,20 @@ function categorizeDep(name: string): string {
 }
 
 function detectFramework(pkgDeps: Record<string, string>): string | undefined {
-  const frameworks = ["next", "nuxt", "svelte", "angular", "express", "nest", "nuxt3", "gatsby", "remix"];
-  for (const fw of frameworks) {
-    if (pkgDeps[fw] || pkgDeps[`@${fw}`]) return fw;
+  // Check well-known frameworks by package name
+  const frameworkPatterns: Record<string, string[]> = {
+    "next": ["next"],
+    "nuxt": ["nuxt", "nuxt3"],
+    "svelte": ["svelte", "sveltekit"],
+    "angular": ["@angular/core"],
+    "express": ["express"],
+    "nest": ["@nestjs/core", "@nestjs/common"],
+    "gatsby": ["gatsby"],
+    "remix": ["@remix-run/react", "@remix-run/node"],
+  };
+
+  for (const [fw, pkgs] of Object.entries(frameworkPatterns)) {
+    if (pkgs.some((pkg) => pkgDeps[pkg])) return fw;
   }
   return undefined;
 }
