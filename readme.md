@@ -59,18 +59,31 @@ CLAUDE.md 存 _git_ref = a1b2c3d
 
 ### 5. Monorepo 支持
 
-| 机制 | 原理 |
-|------|------|
-| **`--package`** | 手动指定子包，扫描/写入都限到该目录 |
-| **MCP Resource** | Server 自动发现 `packages/*/CLAUDE.md`，Claude 原生读取 |
+`--package <name>` 手动指定子包，扫描/写入都限到该目录。
 
-非 monorepo 零影响：无匹配目录时资源列表为空。
+**⚠️ 关键限制：** Claude 启动时只自动读根目录 `CLAUDE.md`，不会发现子包 `CLAUDE.md`。  
+要使子包架构规则生效，必须在根 `CLAUDE.md` 的 **Packages 节**显式列出各包和其关键规则（路由导航）。
+
+```
+# Project Map（根目录）
+...
+## Packages
+- packages/foo/ — 工具库
+- packages/bar/ — API 服务
+
+## Rules
+- 回答或修改涉及任何 packages/ 下的代码时，必须先读取对应包的 CLAUDE.md。已读则不重读。
+```
+
+否则子包 `CLAUDE.md` 即使存在，Claude 也不会主动去读，如同不存在。
+
+`--package` 的职责只是生成/更新子包文件，**根目录路由导航需手动或通过 Skill 同步维护**。非 monorepo 无此限制。
 
 ---
 
 ## MCP Server 模块
 
-`mcp/project-map-server/src/` 拆为 7 文件，各管一事：
+`mcp/project-map-server/src/` 拆为 6 文件，各管一事：
 
 | 模块 | 职责 | 关键导出 |
 |------|------|---------|
@@ -80,9 +93,8 @@ CLAUDE.md 存 _git_ref = a1b2c3d
 | `analyze-files.ts` | 读文件 → 提取 exports → 推断用途 | `ANALYZE_KEY_FILES_TOOL`, `handleAnalyzeKeyFiles` |
 | `detect-stack.ts` | 从 package.json 检测技术栈 | `DETECT_STACK_TOOL`, `handleDetectStack` |
 | `arch-patterns.ts` | 分析命名惯例 + 导入图 → 生成规则 | `EXTRACT_ARCH_PATTERNS_TOOL`, `handleExtractArchPatterns` |
-| `resources.ts` | 自动发现子包 CLAUDE.md | `findPackageClaudeMds` |
 
-所有 tool 通过 `rootPath` 参数支持根目录和包级两种模式，同一个模块两处用。
+所有 tool 通过 `rootPath` 参数支持根目录和包级两种模式，同一模块两处用。
 
 ---
 
@@ -112,8 +124,7 @@ my_claude_plugin/
 │   │   ├── scan.ts                         ← 目录扫描
 │   │   ├── analyze-files.ts                ← 文件分析
 │   │   ├── detect-stack.ts                 ← 技术栈检测
-│   │   ├── arch-patterns.ts                ← 架构模式
-│   │   └── resources.ts                    ← MCP Resource
+│   │   └── arch-patterns.ts                ← 架构模式
 │   └── package.json + tsconfig.json
 ├── docs/
 │   └── LEARN_CLAUDE_PLUGIN.md
