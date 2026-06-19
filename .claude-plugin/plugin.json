@@ -1,12 +1,13 @@
 {
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "project-map",
-  "displayName": "Project Map",
   "version": "1.0.0",
   "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
-  "author": "zihuaiyou",
-  "categories": ["Skills", "MCP Servers"],
-  "skills": [".claude/skills/project-map.md"],
-  "commands": [".claude/commands/update-map.md"],
+  "author": {
+    "name": "zihuaiyou"
+  },
+  "skills": "skills",
+  "commands": "commands",
   "mcpServers": {
     "project-map": {
       "command": "npx",
