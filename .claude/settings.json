@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "project-map": {
-      "command": "node",
-      "args": ["mcp/project-map-server/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "tsx", "mcp/project-map-server/src/index.ts"],
       "env": {}
     }
   }

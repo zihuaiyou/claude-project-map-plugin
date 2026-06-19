@@ -1,0 +1,17 @@
+{
+  "name": "project-map",
+  "displayName": "Project Map",
+  "version": "1.0.0",
+  "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
+  "author": "zihuaiyou",
+  "categories": ["Skills", "MCP Servers"],
+  "skills": [".claude/skills/project-map.md"],
+  "commands": [".claude/commands/update-map.md"],
+  "mcpServers": {
+    "project-map": {
+      "command": "npx",
+      "args": ["-y", "tsx", "${pluginDir}/mcp/project-map-server/src/index.ts"],
+      "env": {}
+    }
+  }
+}

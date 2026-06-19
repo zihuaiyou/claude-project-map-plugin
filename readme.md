@@ -28,19 +28,32 @@
 
 `/update-map` 默认增量模式，只扫描 git 变更文件，跳过 **95-97%** 未改动代码。全量 30 秒 → 增量 5 秒。
 
-## 🚀 快速开始
+## 🚀 安装
+
+### 方式一：插件市场（推荐）
 
 ```bash
-cd mcp/project-map-server && pnpm install
-
 # 在 Claude Code 中运行
-/update-map              # 智能增量更新
-/update-map --full       # 强制全量
-/update-map --quick      # 快速更新，仅对比文件树
-/update-map --package <name>  # monorepo 子包
+/plugin marketplace add project-map github:zihuaiyou/project-map
+/plugin install project-map@project-map
+
+# 装完直接用
+/update-map
 ```
 
-## 📖 命令速查
+### 方式二：本地路径
+
+```bash
+# 下载
+git clone https://github.com/zihuaiyou/project-map.git
+cd project-map/mcp/project-map-server && pnpm install && cd ..
+
+# 在 Claude Code 中注册
+/plugin marketplace add project-map ./path/to/project-map
+/plugin install project-map@project-map
+```
+
+## 📖 命令
 
 | 命令 | 用途 |
 |------|------|

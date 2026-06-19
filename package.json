@@ -1,13 +1,14 @@
 {
-  "name": "my_claude_plugin",
+  "name": "project-map",
+  "displayName": "Project Map",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
+  "keywords": ["claude-code", "claude-plugin", "project-map", "claude-md"],
+  "author": "zihuaiyou",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zihuaiyou/project-map"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "packageManager": "pnpm@10.27.0"
 }
