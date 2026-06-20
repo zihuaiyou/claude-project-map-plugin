@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { DirArchPattern, ArchPatterns, SourceFileSummary } from "./types.js";
+import { getProviderForExtension, getAllProviders } from "./providers/registry.js";
 
 // ==================== Tool Schema ====================
 
@@ -27,10 +28,17 @@ function detectNaming(name: string): DirArchPattern["naming"] {
   return "other";
 }
 
-const IMPORT_RE = /import\s+(?:\{[^}]*\}|[^;{]+?)\s+from\s+['"]([^'"]+)['"]/g;
-
 function extractImports(content: string, filePath: string, rootPath: string): string[] {
+  const ext = path.extname(filePath);
+  const provider = getProviderForExtension(ext);
+
+  if (provider) {
+    return provider.extractImports(content);
+  }
+
+  // Fallback: JS/TS ESM imports (existing logic)
   const imports: string[] = [];
+  const IMPORT_RE = /import\s+(?:\{[^}]*\}|[^;{]+?)\s+from\s+['"]([^'"]+)['"]/g;
   let match: RegExpExecArray | null;
   while ((match = IMPORT_RE.exec(content)) !== null) {
     const target = match[1];
@@ -45,6 +53,23 @@ function extractImports(content: string, filePath: string, rootPath: string): st
 
 function inferDirPurpose(dir: string): string | undefined {
   const d = dir.toLowerCase().replace(/\\/g, "/");
+
+  // Multi-language dir hints from providers
+  for (const p of getAllProviders()) {
+    for (const [hintDir, purpose] of Object.entries(p.dirPurposeHints())) {
+      if (d === hintDir || d.startsWith(hintDir + "/")) {
+        return purpose;
+      }
+    }
+  }
+
+  // Language-agnostic
+  if (/\btests?\b/.test(d) || /__tests__/.test(d) || /spec/.test(d)) return "測試";
+  if (/docs/.test(d)) return "文件";
+  if (/examples/.test(d)) return "範例";
+  if (/scripts/.test(d)) return "腳本";
+
+  // JS/TS framework dir hints (existing)
   if (/components?/.test(d)) return "UI 元件";
   if (/pages?/.test(d)) return "頁面路由";
   if (/app\/router/.test(d) || /\bapp$/.test(d)) return "App Router 頁面";
@@ -57,7 +82,7 @@ function inferDirPurpose(dir: string): string | undefined {
   if (/styles?/.test(d) || /css/.test(d) || /theme/.test(d)) return "樣式";
   if (/config/.test(d)) return "配置";
   if (/layouts?/.test(d)) return "佈局";
-  if (/\btests?\b/.test(d) || /__tests__/.test(d) || /spec/.test(d)) return "測試";
+
   return undefined;
 }
 
@@ -98,7 +123,7 @@ export async function handleExtractArchPatterns(args: Record<string, unknown>) {
     return { content: [{ type: "text", text: JSON.stringify({ error: "path_not_found", message: `Path not found: ${rootPath}` }) }] };
   }
 
-  const sourceFiles = await fg("**/*.{ts,tsx,js,jsx}", {
+  const sourceFiles = await fg("**/*.{ts,tsx,js,jsx,java,py,go,rs}", {
     cwd: rootPath,
     ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**", "**/build/**", "**/coverage/**", "**/.next/**"],
     onlyFiles: true,

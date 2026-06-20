@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import fg from "fast-glob";
 import type { FileInfo } from "./types.js";
+import { getProviderForExtension, getAllProviders } from "./providers/registry.js";
 
 // ==================== Tool Schema ====================
 
@@ -21,7 +22,13 @@ export const ANALYZE_KEY_FILES_TOOL = {
 
 // ==================== Helpers ====================
 
-function extractExports(content: string): string[] {
+function extractExports(content: string, extension?: string): string[] {
+  if (extension) {
+    const provider = getProviderForExtension(extension);
+    if (provider) return provider.extractExports(content);
+  }
+
+  // Fallback: JS/TS exports (existing logic for .ts/.tsx/.js/.jsx)
   const exports: string[] = [];
   const patterns = [
     /export\s+(?:default\s+)?(?:function|class|const|let|var|interface|type|enum)\s+(\w+)/g,
@@ -44,6 +51,7 @@ function inferPurpose(filePath: string, firstLine: string, exports: string[]): s
   const name = path.basename(filePath);
   const dir = path.dirname(filePath).replace(/\\/g, "/");
 
+  // JS/TS config files (existing)
   if (name === "package.json") return "Project metadata & dependencies";
   if (name === "tsconfig.json") return "TypeScript configuration";
   if (name === ".eslintrc.js" || name === ".eslintrc.cjs") return "Linting rules";
@@ -53,6 +61,25 @@ function inferPurpose(filePath: string, firstLine: string, exports: string[]): s
   if (name === "docker-compose.yml" || name === "docker-compose.yaml") return "Docker service orchestration";
   if (name === "Dockerfile") return "Container image definition";
 
+  // Multi-language config files (via providers — check by extension and exact name)
+  const ext = path.extname(name);
+  const extProvider = getProviderForExtension(ext);
+  if (extProvider) {
+    const recognized = extProvider.recognizeFile(name);
+    if (recognized) return recognized;
+  }
+  for (const p of getAllProviders()) {
+    const recognized = p.recognizeFile(name);
+    if (recognized) return recognized;
+  }
+
+  // Language-agnostic directory hints
+  if (dir.includes("tests") || dir.includes("__tests__") || dir.includes("spec")) return "Test files";
+  if (dir.includes("docs")) return "Documentation";
+  if (dir.includes("examples") || dir.includes("samples")) return "Examples";
+  if (dir.includes("scripts")) return "Build/utility scripts";
+
+  // JS/TS framework dir hints (existing)
   if (dir.includes("pages") || dir.includes("app/router")) return "Page component / route handler";
   if (dir.includes("components") || dir.includes("Component")) return "UI component";
   if (dir.includes("lib") || dir.includes("utils") || dir.includes("helpers")) return "Utility / helper functions";
@@ -86,12 +113,21 @@ export async function handleAnalyzeKeyFiles(args: Record<string, unknown>) {
       .map((fp) => path.join(rootPath, fp))
       .filter((p) => fs.existsSync(p));
   } else {
-    const globs = (args.globs as string[]) ?? [
-      "package.json",
-      "tsconfig.json",
-      "src/**/*.{ts,tsx}",
-      "*.config.{js,ts}",
-    ];
+    const globs = (args.globs as string[]) ?? (() => {
+      const allExtensions = new Set<string>([".ts", ".tsx", ".js", ".jsx"]);
+      for (const p of getAllProviders()) {
+        for (const ext of p.language.extensions) {
+          allExtensions.add(ext);
+        }
+      }
+      const extPattern = [...allExtensions].join(",");
+      return [
+        "package.json",
+        "tsconfig.json",
+        `**/*.{${extPattern}}`,
+        "*.config.{js,ts}",
+      ];
+    })();
     const fullGlobs = globs.map((g) => path.posix.join(rootPath.replace(/\\/g, "/"), g));
     pathsToAnalyze = await fg(fullGlobs, { ignore: ["**/node_modules/**", "**/.git/**", "**/dist/**", "**/.claude/**"] });
   }
@@ -108,7 +144,8 @@ export async function handleAnalyzeKeyFiles(args: Record<string, unknown>) {
 
     const stat = fs.statSync(p);
     const firstLine = content.split("\n")[0]?.trim().slice(0, 100);
-    const exports = extractExports(content);
+    const ext = path.extname(p);
+    const exports = extractExports(content, ext);
     const inferredPurpose = inferPurpose(p, firstLine ?? "", exports);
 
     files.push({

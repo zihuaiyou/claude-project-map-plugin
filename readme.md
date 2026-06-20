@@ -51,6 +51,7 @@ cd claude-project-map-plugin/mcp/project-map-server && pnpm install && cd ..
 # 在 Claude Code 中注册
 /plugin marketplace add ./path/to/claude-project-map-plugin
 /plugin install project-map
+```
 
 ## 📖 命令
 
@@ -60,6 +61,8 @@ cd claude-project-map-plugin/mcp/project-map-server && pnpm install && cd ..
 | `--full` | 强制全量重扫 |
 | `--quick` | 仅比对目录树 |
 | `--package <name>` | 限子包范围 |
+
+---
 
 ## 💡 Tips1: Monorepo 路径导航
 
@@ -76,11 +79,17 @@ cd claude-project-map-plugin/mcp/project-map-server && pnpm install && cd ..
 
 否则子包 CLAUDE.md 即使存在，Claude 也不会去读。
 
-## 💡 Tips2: 语言生态支持
+## 💡 Tips2: 多语言支持
 
-目前仅支持 **JavaScript / TypeScript** 生态。Java、Python、Go、Rust 等项目可正常使用目录扫描和文件结构功能，但**技术栈检测、关键文件识别、导出分析**等功能暂不支持。
+现已支持 **TypeScript / JavaScript + Java、Python、Go、Rust** 五种技术栈的深度分析，覆盖：
 
-对应设计文档中 [9.3 多语言栈深度分析](docs/design.md#93-多语言栈深度分析) 迭代计划。
+| 语言 | 检测方式 | 识别内容 |
+| ----- | -------- | -------- |
+| TypeScript / JavaScript | package.json / tsconfig.json | 框架、构建工具、导出声明、ESM 导入 |
+| Java | pom.xml / build.gradle | 类/接口声明、Maven/Gradle 配置 |
+| Python | requirements.txt / setup.py / pyproject.toml | 函数/类导出、依赖列表 |
+| Go | go.mod | 导出符号（首字母大写）、模块定义 |
+| Rust | Cargo.toml | pub 符号、use 导入、crate 配置 |
 
 ---
 

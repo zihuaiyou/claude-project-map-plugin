@@ -19,6 +19,7 @@ export interface FileInfo {
 /** 技术栈信息 */
 export interface StackInfo {
   language?: string;
+  languages: string[];
   framework?: string;
   buildTool?: string;
   testFramework?: string;

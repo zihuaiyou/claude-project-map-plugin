@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { StackInfo } from "./types.js";
+import { getAllProviders } from "./providers/registry.js";
 
 // ==================== Tool Schema ====================
 
@@ -65,43 +66,70 @@ function detectFramework(pkgDeps: Record<string, string>): string | undefined {
 
 export function handleDetectStack(args: Record<string, unknown>) {
   const rootPath = args.rootPath as string;
-  const pkgPath = path.join(rootPath, "package.json");
 
-  if (!fs.existsSync(pkgPath)) {
-    return { content: [{ type: "text", text: JSON.stringify({ error: "no_package_json", message: "No package.json found in root" }) }] };
+  // Detect non-JS languages via providers
+  const languages: string[] = [];
+  for (const provider of getAllProviders()) {
+    if (provider.detect(rootPath)) {
+      languages.push(provider.language.name);
+    }
   }
 
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-
-  const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
-  const keyDeps = Object.entries(allDeps)
-    .map(([name, version]) => ({ name, version: String(version), category: categorizeDep(name) }))
-    .slice(0, 30);
-
-  const framework = detectFramework(allDeps);
-  const buildTool = keyDeps.find((d) => d.category === "build")?.name;
-  const testFramework = keyDeps.find((d) => d.category === "test")?.name;
-
-  const pm = fs.existsSync(path.join(rootPath, "pnpm-lock.yaml"))
-    ? "pnpm"
-    : fs.existsSync(path.join(rootPath, "yarn.lock"))
-    ? "yarn"
-    : fs.existsSync(path.join(rootPath, "package-lock.json"))
-    ? "npm"
-    : undefined;
-
+  // JS/TS detection (existing logic, backward compat)
   const hasTsConfig = fs.existsSync(path.join(rootPath, "tsconfig.json"));
-  const language = hasTsConfig ? "TypeScript" : "JavaScript";
+  if (hasTsConfig && !languages.includes("TypeScript")) languages.unshift("TypeScript");
+
+  // package.json is now optional — read it for JS/TS ecosystem data
+  const pkgPath = path.join(rootPath, "package.json");
+  let pkg: Record<string, unknown> | null = null;
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+  } catch {
+    // No package.json — still return languages from providers
+  }
+
+  let framework: string | undefined;
+  let buildTool: string | undefined;
+  let testFramework: string | undefined;
+  let pm: string | undefined;
+  let projectType = "other";
+  let keyDeps: Array<{ name: string; version: string; category: string }> = [];
+  let scripts: Record<string, string> = {};
+
+  if (pkg) {
+    const allDeps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+    keyDeps = Object.entries(allDeps)
+      .map(([name, version]) => ({ name, version: String(version), category: categorizeDep(name) }))
+      .slice(0, 30);
+
+    framework = detectFramework(allDeps);
+    buildTool = keyDeps.find((d) => d.category === "build")?.name;
+    testFramework = keyDeps.find((d) => d.category === "test")?.name;
+
+    pm = fs.existsSync(path.join(rootPath, "pnpm-lock.yaml"))
+      ? "pnpm"
+      : fs.existsSync(path.join(rootPath, "yarn.lock"))
+        ? "yarn"
+        : fs.existsSync(path.join(rootPath, "package-lock.json"))
+          ? "npm"
+          : undefined;
+
+    projectType = detectProjectType(pkg);
+    scripts = (pkg.scripts as Record<string, string>) ?? {};
+  }
+
+  const language = languages[0] ?? (pkg ? (hasTsConfig ? "TypeScript" : "JavaScript") : undefined);
 
   const result: StackInfo = {
     language,
+    languages,
     framework,
     buildTool,
     testFramework,
     packageManager: pm,
-    projectType: detectProjectType(pkg),
+    projectType,
     keyDependencies: keyDeps,
-    scripts: pkg.scripts ?? {},
+    scripts,
   };
 
   return {
