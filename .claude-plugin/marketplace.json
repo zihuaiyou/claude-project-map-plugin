@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Project Map plugin — auto-maintain CLAUDE.md, save tokens, keep architecture rules",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {
@@ -16,7 +16,7 @@
         "url": "https://github.com/zihuaiyou/claude-project-map-plugin.git"
       },
       "description": "Auto-maintain CLAUDE.md — save tokens, keep architecture rules",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "strict": false
     }
   ]
