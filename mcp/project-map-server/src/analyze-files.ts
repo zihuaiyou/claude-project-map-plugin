@@ -120,7 +120,7 @@ export async function handleAnalyzeKeyFiles(args: Record<string, unknown>) {
           allExtensions.add(ext);
         }
       }
-      const extPattern = [...allExtensions].join(",");
+      const extPattern = [...allExtensions].map((e) => e.startsWith(".") ? e.slice(1) : e).join(",");
       return [
         "package.json",
         "tsconfig.json",
